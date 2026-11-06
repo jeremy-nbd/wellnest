@@ -1,6 +1,103 @@
-# 共养 · 多师共管工作台
+# Wellnest 共养 · 多 Agent 健康管理工作台
 
-一个可运行的 Web 原型，同时呈现健康咨询与 Agent 执行过程。包含营养师、运动医师、全科医师、睡眠师和中医师。
+一个面向健康管理场景的多 Agent 与 RAG 开源演示项目。用户在同一对话中咨询饮食、运动、睡眠等问题，协调 Agent 按需分配营养师、运动医师、全科医师、睡眠师和中医师，专家调用工具获取资料，再由主专家汇总回答。
+
+页面同时呈现咨询内容与实际执行流程，便于观察任务分配、工具调用、专家报告和引用来源。
+
+[本地运行](#本地运行) · [架构流程](#架构流程) · [营养师 PDF RAG](#营养师-pdf-rag) · [MIT 许可证](LICENSE)
+
+## 界面预览
+
+### 咨询与 Agent 工作流
+
+同屏查看咨询结果、参与专家、执行状态和任务详情。以下截图使用演示档案展示界面。
+
+![Wellnest 桌面咨询与多 Agent 工作流](docs/images/consultation-workflow.png)
+
+### 营养知识库与检索证据
+
+知识库面板展示已导入资料、索引规模、检索片段与 PDF 页序。以下为本地知识库的运行截图。
+
+<img src="docs/images/nutrition-rag.png" alt="营养师 PDF 知识库及带页码的检索结果" width="440" />
+
+## 项目亮点
+
+| 能力 | 实现 |
+| --- | --- |
+| 多专家协作 | 协调模型生成包含主专家、子任务和依赖关系的任务图，Zod 与调度逻辑校验结构和依赖 |
+| 按依赖调度 | 独立专家并行执行，有依赖的专家等待上游报告，上游失败时阻止依赖任务继续 |
+| 专家工具循环 | 每位专家具备角色指令、可用工具、任务上下文和结构化报告，按权限读取档案、记录或知识库 |
+| 可观察的执行过程 | 服务端通过 NDJSON 推送路由、工具、专家与汇总事件，前端同步更新架构节点和执行记录 |
+| 营养 PDF RAG | 扫描件 OCR、表格方向校正、按页分段、向量与关键词混合检索、RRF 排序及原页引用 |
+| 视觉核对 | 营养师可调用视觉模型核对食物成分表原页，图片附件也可提取可见信息供用户核对 |
+| 执行边界 | 工具轮数、模型调用预算、超时、取消、格式修正与检索降级均由代码控制 |
+
+技术栈采用 React 19、TypeScript、Vinext、Cloudflare Workers、Zod、SQLite FTS5、RapidOCR 与 DashScope。各专家复用配置的文本模型，通过角色、任务、工具权限和执行上下文区分职责。
+
+## 架构流程
+
+下图展示真实模型模式的咨询执行路径。一次咨询仅唤起任务图中选定的专家，工具返回的信息进入该专家的后续模型调用。
+
+```mermaid
+flowchart TD
+    userInput["用户问题、今日资料与对话上下文"] --> api["咨询 API · 输入校验"]
+    api --> coordinator["协调 Agent · 意图识别与任务分配"]
+    coordinator --> validation["校验主专家、任务唯一性与依赖无环"]
+    validation --> scheduler["依赖调度 · 独立任务并行"]
+    scheduler --> nutrition["营养师"]
+    scheduler --> sports["运动医师"]
+    scheduler --> general["全科医师"]
+    scheduler --> sleep["睡眠师"]
+    scheduler --> tcm["中医师"]
+    nutrition --> expertLoop["各专家独立执行模型与工具循环"]
+    sports --> expertLoop
+    general --> expertLoop
+    sleep --> expertLoop
+    tcm --> expertLoop
+    expertLoop <-->|"按权限读取"| records["健康档案与今日记录"]
+    expertLoop <-->|"其他专家"| references["本地参考摘要"]
+    expertLoop <-->|"营养师"| rag["营养 PDF RAG 与原页视觉核对"]
+    expertLoop --> reports["结构化报告 · 发现、建议、约束与缺失信息"]
+    reports --> synthesis["主专家汇总 · 保留引用与信息缺口"]
+    synthesis --> answer["咨询回答"]
+    coordinator -.-> events["NDJSON 执行事件"]
+    expertLoop -.-> events
+    synthesis -.-> events
+    events --> workflow["前端架构图与执行记录"]
+```
+
+营养知识库通过独立的本地 Node 服务访问 SQLite 索引。离线建库和在线检索按下面的流程衔接。
+
+```mermaid
+flowchart LR
+    pdf["本地 PDF"] --> ocr["RapidOCR · 方向校正与页面坐标"]
+    ocr --> chunks["按页分段 · 表格页首与行重叠"]
+    chunks --> embeddings["DashScope Embedding · 512 维"]
+    chunks --> index["SQLite · FTS5 与向量"]
+    embeddings --> index
+    question["营养查询"] --> retrieval["余弦检索与关键词检索"]
+    index --> retrieval
+    retrieval --> fusion["RRF 合并排序 · 最多五个片段"]
+    fusion --> evidence["文件名、PDF 页序、摘录与原页链接"]
+    evidence --> nutritionAnswer["营养师生成有来源的报告"]
+    evidence -.-> verification["按需调用视觉模型核对原页"]
+    verification --> nutritionAnswer
+```
+
+## 演示路径
+
+1. 启动应用，新建咨询，填写今日睡眠、饮食和运动资料，也可一键填入虚构演示资料。
+2. 在演示模式输入“最近睡不好，想通过饮食和运动改善，请几位专家一起看看”，观察规则路由与预设输出驱动的流程。
+3. 配置 API Key 后切换真实模型，再提问并展开专家节点，查看模型实际分配的任务、工具结果和报告。
+4. 完成 PDF 建库后，在知识库面板搜索问题，或让营养师查询饮食资料，检查返回的文件名、PDF 页序和原页。
+
+目前提供截图与上述操作路径，演示视频待补充。项目支持本地运行，托管部署的条件见下方部署章节。
+
+## 数据与复现范围
+
+本地示例知识库已完成 4 份 PDF、1,873 页、3,999 个片段的索引。这些数字描述该批资料的处理规模，检索质量与回答质量仍需独立评估。
+
+公开仓库提供应用源码、建库脚本和配置模板。运行营养 RAG 时，请自行准备有权使用的 PDF 并建立索引。原始 PDF、OCR 缓存、向量数据库、API Key 和本地服务令牌均通过 `.gitignore` 排除。
 
 ## 本地运行
 
@@ -125,3 +222,9 @@ npm run dev -- --host 127.0.0.1 --port 3000
 OCR 在本机完成。建立向量时文档片段会发送到已配置的 DashScope 接口，咨询时检索片段和按需核对的原页会发送到对应千问模型。密钥与本地服务令牌均仅在服务端读取。
 
 这一版 RAG 使用独立的本地 Node 服务与 SQLite 文件。部署到云端时需要单独部署可访问 PDF 和索引的服务，并配置受保护的 `RAG_SERVICE_URL`，Cloudflare Worker 本身无法读取本机目录。
+
+## 许可证
+
+本项目原创代码与文档采用 MIT 许可证，版权署名为 HE JIE。完整条款见 [LICENSE](LICENSE)。
+
+第三方依赖与随仓库保留的第三方代码遵循各自许可证，相关声明保留在 `vendor/` 与 `scripts/vite/` 中。外部 PDF 资料及截图中的书籍摘录，其权利归原权利人所有，使用时应遵守相应授权条件。
