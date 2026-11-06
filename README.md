@@ -1,6 +1,6 @@
 # Wellnest 共养 · 多 Agent 健康管理工作台
 
-一个面向健康管理场景的多 Agent 与 RAG 开源演示项目。用户在同一对话中咨询饮食、运动、睡眠等问题，协调 Agent 按需分配营养师、运动医师、全科医师、睡眠师和中医师，专家调用工具获取资料，再由主专家汇总回答。
+一个以 **Python / FastAPI** 为核心后端的多 Agent 与 RAG 开源演示项目。用户在同一对话中咨询饮食、运动、睡眠等问题，协调 Agent 按需分配营养师、运动医师、全科医师、睡眠师和中医师，专家调用工具获取资料，再由主专家汇总回答。
 
 页面同时呈现咨询内容与实际执行流程，便于观察任务分配、工具调用、专家报告和引用来源。
 
@@ -24,7 +24,7 @@
 
 | 能力 | 实现 |
 | --- | --- |
-| 多专家协作 | 协调模型生成包含主专家、子任务和依赖关系的任务图，Zod 与调度逻辑校验结构和依赖 |
+| 多专家协作 | 协调模型生成包含主专家、子任务和依赖关系的任务图，Pydantic 与 Python 调度逻辑校验结构和依赖 |
 | 按依赖调度 | 独立专家并行执行，有依赖的专家等待上游报告，上游失败时阻止依赖任务继续 |
 | 专家工具循环 | 每位专家具备角色指令、可用工具、任务上下文和结构化报告，按权限读取档案、记录或知识库 |
 | 可观察的执行过程 | 服务端通过 NDJSON 推送路由、工具、专家与汇总事件，前端同步更新架构节点和执行记录 |
@@ -32,7 +32,7 @@
 | 视觉核对 | 营养师可调用视觉模型核对食物成分表原页，图片附件也可提取可见信息供用户核对 |
 | 执行边界 | 工具轮数、模型调用预算、超时、取消、格式修正与检索降级均由代码控制 |
 
-技术栈采用 React 19、TypeScript、Vinext、Cloudflare Workers、Zod、SQLite FTS5、RapidOCR 与 DashScope。各专家复用配置的文本模型，通过角色、任务、工具权限和执行上下文区分职责。
+核心后端采用 Python 3.11+、FastAPI、Pydantic、HTTPX、asyncio、SQLite FTS5 与 RapidOCR。React 19 / TypeScript 负责网页与工作流可视化，Vinext / Cloudflare Worker 作为同源 API 网关。各专家复用配置的文本模型，通过角色、任务、工具权限和执行上下文区分职责。
 
 ## 架构流程
 
@@ -40,9 +40,9 @@
 
 ```mermaid
 flowchart TD
-    userInput["用户问题、今日资料与对话上下文"] --> api["咨询 API · 输入校验"]
-    api --> coordinator["协调 Agent · 意图识别与任务分配"]
-    coordinator --> validation["校验主专家、任务唯一性与依赖无环"]
+    userInput["用户问题、今日资料与对话上下文"] --> api["Web 网关 · 身份与来源检查"]
+    api --> coordinator["Python 协调 Agent · 意图识别与任务分配"]
+    coordinator --> validation["Pydantic · 校验任务与依赖无环"]
     validation --> scheduler["依赖调度 · 独立任务并行"]
     scheduler --> nutrition["营养师"]
     scheduler --> sports["运动医师"]
@@ -66,7 +66,7 @@ flowchart TD
     events --> workflow["前端架构图与执行记录"]
 ```
 
-营养知识库通过独立的本地 Node 服务访问 SQLite 索引。离线建库和在线检索按下面的流程衔接。
+营养知识库通过独立的 Python / FastAPI 服务访问 SQLite 索引。离线建库和在线检索按下面的流程衔接。
 
 ```mermaid
 flowchart LR
@@ -101,14 +101,21 @@ flowchart LR
 
 ## 本地运行
 
-需要 Node.js 22.13 或更新版本。
+需要 Python 3.11+ 与 Node.js 22.13+。先安装 Python API 依赖，再安装网页依赖。
 
 ```sh
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r backend/requirements.txt
 npm install
 cp .env.example .dev.vars
-# 在 .dev.vars 中填写 LLM_API_KEY
+# 在 .dev.vars 中填写 LLM_API_KEY 和 BACKEND_SERVICE_TOKEN
 npm run dev -- --host 127.0.0.1 --port 3000
 ```
+
+`npm run dev` 会启动 Python 后端（默认 3012 端口）与 Web 网关（3000 端口）。未填写服务令牌时，开发启动器生成仅用于当前进程的随机令牌。已有 `RAG_SERVICE_TOKEN` 可兼容使用，旧的 `RAG_SERVICE_URL` 不再参与请求路由。
+
+也可通过 `npm run backend:serve` 单独启动后端，此时需在 `.dev.vars` 配置服务令牌。后端 HTTP 接口均要求 Bearer 令牌，前端通过同源网关访问。
 
 打开终端输出的本地地址。已有 `.dev.vars` 时请直接编辑，复制模板会覆盖原有配置。修改配置后重启服务。
 
@@ -140,7 +147,7 @@ npm run dev -- --host 127.0.0.1 --port 3000
 ### 真实模型模式
 
 1. 协调模型读取当前问题、最近八轮成功对话、专家偏好和基础档案摘要。
-2. 返回经 Zod 校验的任务图，包含主专家、子任务及依赖。代码拒绝重复专家、缺少主专家、循环或不存在的依赖。
+2. 返回经 Pydantic 校验的任务图，包含主专家、子任务及依赖。代码拒绝重复专家、缺少主专家、循环或不存在的依赖。
 3. 独立任务并行执行，有依赖的任务等待上游完成。上游失败时暂停依赖它的任务。
 4. 每位专家自主选择工具，工具结果返回模型。最多四轮工具选择、八次工具执行，随后强制形成报告。报告格式校验失败时最多修正一次，所有模型调用仍受总预算约束。
 5. 主专家整合已完成报告，检查建议和适用条件，保留冲突、失败及信息缺口。
@@ -163,15 +170,19 @@ npm run dev -- --host 127.0.0.1 --port 3000
 | 文件 | 职责 |
 | --- | --- |
 | `app/page.tsx` | 咨询界面、动态图、会话、档案、模型状态 |
-| `app/api/chat/route.ts` | 输入校验、身份与来源检查、请求体上限、实时事件流 |
+| `app/api/chat/route.ts`、`lib/backend.ts` | 同源网关、身份与来源检查、请求体上限、转发实时事件流 |
 | `app/api/config/route.ts` | 返回模型参数与密钥配置状态 |
-| `lib/orchestrator.ts` | 路由、任务依赖调度、专家循环、主专家汇总 |
-| `lib/provider.ts` | DashScope 兼容请求、超时、调用预算、错误脱敏 |
-| `lib/tools.ts` | 工具定义、权限、记录读取、本地知识检索 |
+| `backend/wellnest/orchestrator.py` | 路由、asyncio 依赖调度、专家循环、主专家汇总 |
+| `backend/wellnest/provider.py` | HTTPX 异步千问请求、超时、调用预算、错误脱敏 |
+| `backend/wellnest/tools.py` | 工具权限、记录读取、本地知识检索、原页视觉核对 |
+| `backend/wellnest/models.py`、`api.py` | Pydantic 数据契约、FastAPI 接口与 NDJSON 事件流 |
+| `backend/wellnest/rag.py`、`indexer.py` | 混合检索、PDF 原页访问、断点建库与原子替换 |
+| `scripts/rag/extract.py` | 扫描件 OCR 与页面方向校正 |
 | `app/components/daily-intake.tsx` | 每次对话的资料收集与摘要 |
 | `lib/intake.ts` | 今日资料校验、时间格式化与会话档案合并 |
 | `lib/domain.ts` | 领域类型、数据校验、五位专家定义、演示档案 |
-| `tests/orchestrator.test.ts` | 编排、工具权限、失败依赖、取消等回归检查 |
+| `backend/tests/` | 编排、工具权限、失败依赖、取消、接口、旧索引与重建回归检查 |
+| `tests/intake.test.ts` | 今日资料与历史会话兼容性检查 |
 
 ## 验证
 
@@ -181,11 +192,13 @@ npm test
 npm run build
 ```
 
+`npm test` 执行 24 项 Python 后端回归测试与 3 项前端资料测试，覆盖并行调度、断开连接取消、工具预算、引用核验、旧索引读取及失败重建保护。
+
 真实调用需要用户自行配置的 API Key 与对应模型区域权限。自动化测试使用模拟模型响应，不产生模型调用费用。
 
 ## 部署
 
-项目基于 React、Vinext 和 Cloudflare Workers，保留 Sites 的构建集成。线上使用平台 Secret 配置 `LLM_API_KEY`，其余参数采用同名环境变量。应保持站点为已登录的私有访问；API 在非本机地址要求平台身份。当前本地代码不包含有效的 Sites 项目注册 ID，线上发布需要恢复 Sites 服务后完成注册与部署。
+部署包含 Web 网关和 Python 后端两个进程。Python 服务配置 `LLM_API_KEY`、模型参数与 `BACKEND_SERVICE_TOKEN`，并挂载 PDF 和 SQLite 索引。Web 网关配置受保护的 `BACKEND_SERVICE_URL` 与相同服务令牌。网关在非本机地址要求平台身份，后端接口要求 Bearer 令牌。当前保留 Sites 构建集成，本地代码未包含有效的 Sites 项目注册 ID，托管发布需另行完成平台注册与部署。
 
 咨询内容用于功能演示和一般健康管理信息。需要专业判断的诊断、处方、治疗调整应由持证医疗人员处理，临床内容与规则上线前应经过专业审核。
 
@@ -206,12 +219,12 @@ npm run build
 
 ### 本机运行与重建
 
-当前机器已完成 Python OCR 环境配置，路径记录在被忽略的 `.rag/runtime.json`。`npm run dev -- --host 127.0.0.1 --port 3000` 会同时启动 Web 应用与本地 RAG 服务。原始书籍放在 `RAG/`，OCR、向量数据库和原页缓存放在 `.rag/`，两个目录均已加入 `.gitignore`。
+Python 启动器按 `PYTHON` 环境变量、项目 `.venv`、旧 `.rag/runtime.json` 的顺序查找解释器，兼容迁移前的 OCR 环境。`npm run dev -- --host 127.0.0.1 --port 3000` 会同时启动 Web 应用与 Python 后端。原始书籍放在 `RAG/`，OCR、向量数据库和原页缓存放在 `.rag/`，两个目录均已加入 `.gitignore`。
 
-首次在另一台机器建立知识库需要 Node.js 22.13+、Python 3.11+，以及 `.dev.vars` 中的模型配置和 `RAG_SERVICE_TOKEN`。可按 `.env.example` 生成随机本地服务令牌。默认本地服务监听 `127.0.0.1:3011`。
+首次在另一台机器建立知识库需要 Node.js 22.13+、Python 3.11+，以及 `.dev.vars` 中的模型配置和 `BACKEND_SERVICE_TOKEN`。可按 `.env.example` 生成随机本地服务令牌。默认 Python 后端监听 `127.0.0.1:3012`。已有 SQLite 索引与页面缓存可直接复用。
 
 ```sh
-PYTHON=python3.11 npm run rag:setup
+python -m pip install -r scripts/rag/requirements.txt
 npm run rag:extract
 npm run rag:index
 npm run dev -- --host 127.0.0.1 --port 3000
@@ -221,10 +234,14 @@ npm run dev -- --host 127.0.0.1 --port 3000
 
 OCR 在本机完成。建立向量时文档片段会发送到已配置的 DashScope 接口，咨询时检索片段和按需核对的原页会发送到对应千问模型。密钥与本地服务令牌均仅在服务端读取。
 
-这一版 RAG 使用独立的本地 Node 服务与 SQLite 文件。部署到云端时需要单独部署可访问 PDF 和索引的服务，并配置受保护的 `RAG_SERVICE_URL`，Cloudflare Worker 本身无法读取本机目录。
+这一版 RAG 使用独立的 Python / FastAPI 服务与 SQLite 文件。部署到云端时需要单独部署可访问 PDF 和索引的服务，并配置受保护的 `BACKEND_SERVICE_URL`，Cloudflare Worker 本身无法读取本机目录。
 
 ## 许可证
 
 本项目原创代码与文档采用 MIT 许可证，版权署名为 HE JIE。完整条款见 [LICENSE](LICENSE)。
 
 第三方依赖与随仓库保留的第三方代码遵循各自许可证，相关声明保留在 `vendor/` 与 `scripts/vite/` 中。外部 PDF 资料及截图中的书籍摘录，其权利归原权利人所有，使用时应遵守相应授权条件。
+
+### 后端实现参考
+
+流式接口使用 FastAPI `StreamingResponse`，模型调用使用 HTTPX 异步客户端。实现方式参考官方文档。[FastAPI 响应文档](https://fastapi.tiangolo.com/advanced/custom-response/)、[HTTPX 异步客户端](https://www.python-httpx.org/async/)

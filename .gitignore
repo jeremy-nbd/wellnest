@@ -52,3 +52,5 @@ yarn-error.log*
 # Python OCR caches
 __pycache__/
 *.py[cod]
+
+/.venv/

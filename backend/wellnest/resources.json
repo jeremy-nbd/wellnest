@@ -1,0 +1,368 @@
+{
+  "experts": {
+    "nutrition": {
+      "name": "营养师",
+      "subtitle": "饮食与营养",
+      "color": "#bd8348",
+      "scope": "饮食记录、营养摄入、饮食偏好与过敏，结合健康约束提出饮食建议"
+    },
+    "sports": {
+      "name": "运动医师",
+      "subtitle": "运动与恢复",
+      "color": "#64897b",
+      "scope": "运动记录、运动强度、恢复、运动中的心率，结合身体状况评估运动安排"
+    },
+    "general": {
+      "name": "全科医师",
+      "subtitle": "综合健康",
+      "color": "#56869a",
+      "scope": "综合健康咨询、症状梳理、心率血压与检查报告、多领域约束及就医建议"
+    },
+    "sleep": {
+      "name": "睡眠师",
+      "subtitle": "睡眠与作息",
+      "color": "#8980b0",
+      "scope": "睡眠时长、作息、夜间觉醒、白天困倦与影响睡眠的生活习惯"
+    },
+    "tcm": {
+      "name": "中医师",
+      "subtitle": "体质与调养",
+      "color": "#9d8961",
+      "scope": "中医健康知识、体质问卷信息与生活调养，区分用户自述和临床辨证"
+    }
+  },
+  "knowledge": [
+    {
+      "id": "cdc-sleep",
+      "topics": [
+        "sleep",
+        "general",
+        "sports"
+      ],
+      "title": "CDC · About Sleep",
+      "url": "https://www.cdc.gov/sleep/about/",
+      "detail": "18–60 岁成年人一般建议每晚至少睡眠 7 小时。睡眠质量同样重要。持续睡眠困扰应与医疗专业人员讨论。"
+    },
+    {
+      "id": "who-diet",
+      "topics": [
+        "nutrition",
+        "general"
+      ],
+      "title": "WHO · Healthy diet",
+      "url": "https://www.who.int/news-room/fact-sheets/detail/healthy-diet",
+      "detail": "多样化的水果、蔬菜、豆类、全谷物和适当蛋白质来源有助于健康饮食。具体饮食方案需要考虑个体需求。"
+    }
+  ],
+  "definitions": {
+    "nutrition": [
+      {
+        "type": "function",
+        "function": {
+          "name": "verify_nutrition_page",
+          "description": "使用视觉模型核对已检索到的 PDF 原页。引用食物成分表具体数值前必须核对行列、单位及计量基准。sourceId 使用检索返回的 id，question 写清需要核对的食物和营养素。",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "sourceId": {
+                "type": "string"
+              },
+              "question": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sourceId",
+              "question"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "read_health_profile",
+          "description": "读取用户提供的基础档案、目标、用药和过敏信息，空字段代表未知。",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "read_health_records",
+          "description": "读取用户录入或虚构演示的健康记录。记录内日期为原始描述，工具不会创造缺失日期和数据。",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "diet",
+                  "sleep"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "search_nutrition_knowledge",
+          "description": "检索用户提供的膳食指南2022、营养素参考摄入量2023、食物成分表第6版两册。通过向量与关键词查找原文，返回文件名、PDF页码和OCR片段。查询应聚焦主题、食物、人群、营养素。",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "sports": [
+      {
+        "type": "function",
+        "function": {
+          "name": "read_health_profile",
+          "description": "读取用户提供的基础档案、目标、用药和过敏信息，空字段代表未知。",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "read_health_records",
+          "description": "读取用户录入或虚构演示的健康记录。记录内日期为原始描述，工具不会创造缺失日期和数据。",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "exercise",
+                  "sleep",
+                  "vitals"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "search_knowledge",
+          "description": "检索内置小型参考库。覆盖睡眠及饮食基础知识，其他主题可能无匹配。",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "general": [
+      {
+        "type": "function",
+        "function": {
+          "name": "read_health_profile",
+          "description": "读取用户提供的基础档案、目标、用药和过敏信息，空字段代表未知。",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "read_health_records",
+          "description": "读取用户录入或虚构演示的健康记录。记录内日期为原始描述，工具不会创造缺失日期和数据。",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "sleep",
+                  "diet",
+                  "exercise",
+                  "vitals"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "search_knowledge",
+          "description": "检索内置小型参考库。覆盖睡眠及饮食基础知识，其他主题可能无匹配。",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "sleep": [
+      {
+        "type": "function",
+        "function": {
+          "name": "read_health_profile",
+          "description": "读取用户提供的基础档案、目标、用药和过敏信息，空字段代表未知。",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "read_health_records",
+          "description": "读取用户录入或虚构演示的健康记录。记录内日期为原始描述，工具不会创造缺失日期和数据。",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "sleep",
+                  "diet",
+                  "exercise",
+                  "vitals"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "search_knowledge",
+          "description": "检索内置小型参考库。覆盖睡眠及饮食基础知识，其他主题可能无匹配。",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tcm": [
+      {
+        "type": "function",
+        "function": {
+          "name": "read_health_profile",
+          "description": "读取用户提供的基础档案、目标、用药和过敏信息，空字段代表未知。",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "read_health_records",
+          "description": "读取用户录入或虚构演示的健康记录。记录内日期为原始描述，工具不会创造缺失日期和数据。",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "sleep",
+                  "diet",
+                  "exercise"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "search_knowledge",
+          "description": "检索内置小型参考库。覆盖睡眠及饮食基础知识，其他主题可能无匹配。",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ]
+  }
+}

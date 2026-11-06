@@ -12,12 +12,13 @@
     "start": "node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --local --persist-to .wrangler/state --ip 127.0.0.1 --inspector-port 0",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
-    "test": "node scripts/test-agent.mjs",
+    "test": "node scripts/python.mjs -m unittest discover -s backend/tests -v && node scripts/test-agent.mjs",
     "typecheck": "tsc --noEmit",
     "rag:setup": "node scripts/rag/run.mjs setup",
     "rag:extract": "node scripts/rag/run.mjs extract",
-    "rag:index": "node scripts/rag/index.mjs",
-    "rag:serve": "node scripts/rag/server.mjs"
+    "rag:index": "node scripts/python.mjs -m backend.wellnest.indexer",
+    "rag:serve": "node scripts/python.mjs -m uvicorn backend.wellnest.api:app --host 127.0.0.1 --port 3012",
+    "backend:serve": "node scripts/python.mjs -m uvicorn backend.wellnest.api:app --host 127.0.0.1 --port 3012"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
