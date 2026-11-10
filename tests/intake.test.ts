@@ -42,3 +42,15 @@ test("legacy conversations preserve their existing profile path", async () => {
   const { consultationProfile } = await import("../lib/intake");
   assert.deepEqual(consultationProfile(input.profile), input.profile);
 });
+
+test("meal drafts and demo records stay out of real shared context", async () => {
+  const { confirmedMeals, mealTotals, mealSchema } = await import("../lib/meals");
+  const food = { name: "熟米饭", portion: "一碗", grams: 150, per100g: { kcal: 116, protein: 2.6, carbs: 25.9, fat: 0.3 }, note: "估算" };
+  const meal = { id: "one", title: "午餐", date: "2026-11-10", slot: "午餐" as const, mode: "live" as const, status: "confirmed" as const, items: [food], notes: [], question: "" };
+  assert.equal(confirmedMeals([meal, { ...meal, status: "draft" }, { ...meal, mode: "demo" }], "live").length, 1);
+  assert.equal(mealTotals([food]).kcal, 174);
+  assert.equal(mealTotals([{ ...food, grams: 75 }]).kcal, 87);
+  assert.equal(mealSchema.safeParse({ ...meal, items: [{ ...food, grams: null }] }).success, false);
+  assert.equal(mealSchema.safeParse({ ...meal, date: "2026-02-30" }).success, false);
+  assert.equal(mealSchema.safeParse({ ...meal, items: [] }).success, false);
+});

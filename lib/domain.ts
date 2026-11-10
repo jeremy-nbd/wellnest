@@ -153,7 +153,16 @@ export type TraceEvent = {
   agent?: AgentId;
   at: string;
 };
+export type RunMetrics = {
+  path: "fast" | "single" | "multi" | "demo" | "clarification";
+  totalMs: number;
+  firstTextMs: number | null;
+  modelCalls: number | null;
+  stages: { stage: string; durationMs: number }[];
+  modelTimings: { kind: string; durationMs: number }[];
+};
 export type Result = {
+  metrics?: RunMetrics;
   answer: string;
   route: Route;
   reports: Report[];
@@ -165,5 +174,6 @@ export type Result = {
 export type StreamEvent =
   | { type: "trace"; data: TraceEvent }
   | { type: "route"; data: Route }
+  | { type: "answer_delta"; data: { text: string } }
   | { type: "result"; data: Result }
   | { type: "error"; data: { message: string } };

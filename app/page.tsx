@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { answerForDisplay } from "../lib/answer-display";
 import {
   Activity,
+  Camera,
   ArrowUp,
   Check,
   CheckCheck,
@@ -45,6 +47,10 @@ import {
   TraceEvent,
 } from "../lib/domain";
 
+import { MealCard } from "./components/meal-card";
+import { Meal, mealSchema, mealTotals, confirmedMeals } from "../lib/meals";
+import { todayDate } from "../lib/intake";
+
 import { DailyIntakeCard } from "./components/daily-intake";
 import { NutritionLibrary } from "./components/nutrition-library";
 import {
@@ -72,6 +78,8 @@ type Turn = {
   error?: string;
   status: "running" | "done" | "error" | "stopped";
   hasImage?: boolean;
+  meal?: Meal;
+  mealRequest?: boolean;
 };
 type Conversation = {
   id: string;
@@ -167,6 +175,7 @@ export default function Home() {
   const [preferred, setPreferred] = useState<"auto" | AgentId>("auto");
   const [input, setInput] = useState("");
   const [image, setImage] = useState<string>();
+  const [mealIntent, setMealIntent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [config, setConfig] = useState<ModelConfig>();
@@ -182,8 +191,12 @@ export default function Home() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const foodFileRef = useRef<HTMLInputElement>(null);
   const active = conversations.find((c) => c.id === activeId);
   const turns = active?.turns ?? [];
+  const meals = turns.flatMap((t) => t.meal ? [t.meal] : []);
+  const todaysMeals = meals.filter((m) => m.status === "confirmed" && m.mode === mode && m.date === todayDate());
+  const todayTotals = mealTotals(todaysMeals.flatMap((m) => m.items));
   const currentProfile = consultationProfile(profile, active?.intake);
   const turn = turns.find((t) => t.id === selectedTurn) ?? turns.at(-1);
   const route = turn?.route;
@@ -235,6 +248,7 @@ export default function Home() {
                   typeof t.answer === "string" &&
                   Array.isArray(t.trace),
               )
+              .map((t) => ({ ...t, meal: mealSchema.safeParse(t.meal).success ? t.meal : undefined }))
               .map((t) =>
                 t.status === "running"
                   ? {
@@ -307,10 +321,13 @@ export default function Home() {
     setSelectedAgent(null);
     setInput("");
     setImage(undefined);
+    setMealIntent(false);
     setNotice("");
   }
-  async function send(question = input, retryId?: string) {
-    if (busy || !active || !question.trim()) return;
+  async function send(question = input, retryId?: string, nutritionOnly = false) {
+    if (!retryId && mealIntent && !nutritionOnly) { await analyzeMeal(); return; }
+    if (busy || !active || (!question.trim() && !image)) return;
+    question = question.trim() || "请分析这张图片中的信息。";
     if (active.intake && !intakeSchema.safeParse(active.intake).success) {
       setNotice("请先检查今日资料中的日期和睡眠时长。");
       return;
@@ -324,9 +341,9 @@ export default function Home() {
     setSelectedAgent(null);
     const id = retryId ?? crypto.randomUUID();
     const conversationId = active.id;
-    const upload = retryId ? undefined : image;
+    const upload = retryId || nutritionOnly ? undefined : image;
     const previous = turns
-      .filter((t) => t.status === "done" && t.id !== retryId)
+      .filter((t) => t.status === "done" && t.id !== retryId && !t.mealRequest && (!t.mode || t.mode === mode))
       .slice(-8);
     const messages = previous.flatMap((t) => [
       { role: "user", content: t.question },
@@ -369,7 +386,8 @@ export default function Home() {
         body: JSON.stringify({
           messages,
           profile: currentProfile,
-          preferred,
+          preferred: nutritionOnly ? "nutrition" : preferred,
+          meals: confirmedMeals(meals, mode),
           mode,
           previousAgent: previous.at(-1)?.route?.primary,
           image: upload,
@@ -393,6 +411,8 @@ export default function Home() {
           }));
         if (event.type === "route")
           updateTurn(conversationId, id, { route: event.data });
+        if (event.type === "answer_delta")
+          updateTurn(conversationId, id, (t) => ({ ...t, answer: t.answer + event.data.text }));
         if (event.type === "result") {
           receivedResult = true;
           updateTurn(conversationId, id, {
@@ -431,7 +451,42 @@ export default function Home() {
       abortRef.current = null;
     }
   }
-  function chooseFile(file?: File) {
+  async function analyzeMeal(example = false) {
+    if (busy || !active) return;
+    if (!example && mode !== "live") {
+      setNotice("真实食物识别请切换真实模型；也可以先体验示例餐食。");
+      return;
+    }
+    if (!example && !config?.configured) { setModal("settings"); return; }
+    if (!example && !image && !input.trim()) { setNotice("请上传食物照片或描述这餐食物。"); return; }
+    const id = crypto.randomUUID();
+    const conversationId = active.id;
+    const requestMode = example ? "demo" : "live";
+    const question = example ? "体验拍照记餐（虚构示例）" : input.trim() || "帮我识别这餐食物、分量和营养。";
+    const mealRoute: Route = { primary: "nutrition", tasks: [{ agent: "nutrition", task: "识别食物与分量，等待用户确认", dependsOn: [] }], summary: "由营养师处理餐食识别", clarification: null, urgent: false };
+    const fresh: Turn = { id, question, mode: requestMode, answer: "", status: "running", mealRequest: true, hasImage: !example && !!image, route: mealRoute, trace: [{ id: crypto.randomUUID(), type: "tool", title: example ? "载入示例餐食" : "识别食物与估算分量", detail: "结果将作为草稿，确认前不计入摄入。", agent: "nutrition", at: new Date().toISOString() }] };
+    setConversations((all) => all.map((c) => c.id === conversationId ? { ...c, title: c.turns.length ? c.title : "拍照记餐与营养咨询", turns: [...c.turns, fresh] } : c));
+    setSelectedTurn(id);
+    setBusy(true);
+    setNotice("");
+    const abort = new AbortController();
+    abortRef.current = abort;
+    try {
+      const response = await fetch("/api/meals/analyze", {
+        method: "POST", signal: AbortSignal.any([abort.signal, AbortSignal.timeout(250000)]),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: requestMode, text: example ? "" : input, image: example ? undefined : image }),
+      });
+      const body = await response.json() as Record<string, unknown>;
+      if (!response.ok) throw new Error(String(body.error || "餐食识别失败，请重试。"));
+      const meal = mealSchema.parse({ ...body, id, date: todayDate(), slot: "午餐", mode: requestMode, status: "draft" });
+      updateTurn(conversationId, id, (t) => ({ ...t, meal, status: "done", trace: [...t.trace, { id: crypto.randomUUID(), type: "agent", title: "餐食草稿待确认", detail: "请核对实际食用分量，尚未进入共享记录。", agent: "nutrition", at: new Date().toISOString() }] }));
+      setInput(""); setImage(undefined); setMealIntent(false);
+    } catch (error) {
+      updateTurn(conversationId, id, { status: abort.signal.aborted ? "stopped" : "error", error: abort.signal.aborted ? "已停止识别，照片和描述仍保留在输入框。" : error instanceof Error ? error.message : "识别失败，请重试。" });
+    } finally { setBusy(false); abortRef.current = null; }
+  }
+  function chooseFile(file?: File, food = false) {
     if (!file) return;
     if (mode !== "live") {
       setNotice("图片识别需要切换到真实模型模式。");
@@ -445,7 +500,7 @@ export default function Home() {
       return;
     }
     const reader = new FileReader();
-    reader.onload = () => setImage(String(reader.result));
+    reader.onload = () => { setImage(String(reader.result)); setMealIntent(food); };
     reader.onerror = () => setNotice("图片读取失败，请重新选择。");
     reader.readAsDataURL(file);
   }
@@ -749,10 +804,13 @@ export default function Home() {
                           <div className="thinking">
                             <LoaderCircle size={15} className="spin" />
                             <span>
-                              {t.trace.at(-1)?.title || "正在连接咨询服务…"}
+                              {t.answer ? "正在生成回答…" : t.trace.at(-1)?.title || "正在连接咨询服务…"}
                             </span>
                           </div>
                         )}
+                        {t.meal && <MealCard meal={t.meal} disabled={busy} onChange={(meal) => updateTurn(activeId, t.id, { meal })}
+                          onDiscuss={() => { if (t.meal!.mode !== mode) { setNotice("请先切换到这条餐食记录对应的运行模式，再请求解读。"); return; } setMealIntent(false); void send(`请营养师读取已确认的${t.meal!.date}${t.meal!.slot}餐食记录，简短解读${t.meal!.items.map((f) => f.name).join("、")}这餐的营养，并给一个可执行建议。`, undefined, true); }}
+                          onCorrect={() => { updateTurn(activeId, t.id, { meal: { ...t.meal!, status: "discarded" } }); setMealIntent(true); setInput(t.meal!.items.map((f) => f.name).join("、")); inputRef.current?.focus(); }} />}
                         {t.answer && (
                           <>
                             <div className="answer-mode">
@@ -762,15 +820,18 @@ export default function Home() {
                               {t.result?.dataSource === "demo" &&
                                 " · 使用演示档案"}
                             </div>
-                            <Markdown text={t.answer} />
+                            <Markdown text={answerForDisplay(t.answer)} />
                           </>
+                        )}
+                        {t.answer && (t.status === "stopped" || t.status === "error") && (
+                          <p className="partial-note">回答未完成，以上仅为已生成的部分。</p>
                         )}
                         {t.error && (
                           <div className="error-card">
                             <p>{t.error}</p>
                             <button
                               disabled={busy}
-                              onClick={() => send(t.question, t.id)}
+                              onClick={() => t.mealRequest ? analyzeMeal(t.mode === "demo") : send(t.question, t.id)}
                             >
                               <RotateCcw size={13} /> 重新执行
                             </button>
@@ -826,6 +887,8 @@ export default function Home() {
                   </button>
                 </div>
               )}
+              {mode === "demo" && <button className="meal-demo" disabled={busy || !hydrated} onClick={() => analyzeMeal(true)}>体验示例餐食 · 不计入真实摄入</button>}
+              {todaysMeals.length > 0 && <div className="meal-daily" role="status">{mode === "demo" ? "示例 · " : ""}今天已记录 {todaysMeals.length} 餐 · 约 {Math.round(todayTotals.kcal)} 千卡 · 蛋白质 {Math.round(todayTotals.protein)} 克 · 碳水 {Math.round(todayTotals.carbs)} 克 · 脂肪 {Math.round(todayTotals.fat)} 克<span>仅当前咨询已确认记录</span></div>}
               <div className="data-strip">
                 <Database size={13} />
                 <span>
@@ -859,6 +922,9 @@ export default function Home() {
                     </button>
                   </div>
                 )}
+                {mealIntent && <div className="meal-composer-label"><Utensils size={14} /> 拍照记餐 · 营养师识别
+                  <button disabled={busy} onClick={() => setMealIntent(false)}>切回普通咨询</button></div>}
+                {image && !mealIntent && <button className="meal-image-switch" onClick={() => setMealIntent(true)}>这是食物照片？转为拍照记餐</button>}
                 <textarea
                   aria-label="咨询内容"
                   ref={inputRef}
@@ -875,12 +941,17 @@ export default function Home() {
                       send();
                     }
                   }}
-                  placeholder="说说你最近的状态，或问一个健康问题…"
+                  placeholder={mealIntent ? "可补充食物名称、烹饪方式或分量，也可以直接发送照片…" : "说说你最近的状态，或问一个健康问题…"}
                   rows={2}
                   disabled={busy}
                 />
                 <div className="composer-tools">
                   <div>
+                    <button className="food-entry" disabled={busy || !hydrated} onClick={() => {
+                      if (mode === "demo") { setMealIntent(true); setNotice("可点击“体验示例餐食”查看流程；识别自己的食物请切换真实模型。"); return; }
+                      setMealIntent(true); foodFileRef.current?.click();
+                    }}><Camera size={17} />拍食物</button>
+                    <input ref={foodFileRef} type="file" accept="image/png,image/jpeg,image/webp" capture="environment" hidden onChange={(e) => { chooseFile(e.target.files?.[0], true); e.target.value = ""; }} />
                     <button
                       title="添加图片（真实模型模式）"
                       aria-label="添加图片"
@@ -917,7 +988,7 @@ export default function Home() {
                   ) : (
                     <button
                       className="send-button"
-                      disabled={!input.trim() || !hydrated}
+                      disabled={(!input.trim() && !image) || !hydrated}
                       aria-label="发送咨询"
                       onClick={() => send()}
                     >
@@ -1102,8 +1173,8 @@ export default function Home() {
                     >
                       <CheckCheck size={20} />
                       <span>
-                        <strong>主专家汇总与检查</strong>
-                        <small>整合建议 · 保留约束 · 标记分歧</small>
+                        <strong>{route?.tasks.length === 1 && turn?.mode === "live" ? "专家直接回答" : "主专家汇总与检查"}</strong>
+                        <small>{route?.tasks.length === 1 && turn?.mode === "live" ? "依据已读资料 · 直接生成正文" : "整合建议 · 保留约束 · 标记分歧"}</small>
                       </span>
                       {stage === 4 && <Check size={15} />}
                     </button>
@@ -1132,6 +1203,14 @@ export default function Home() {
                         </button>
                       )}
                     </div>
+                    {turn?.result?.metrics && (
+                      <p className="assigned-task">
+                        {turn.result.metrics.path === "fast" ? "日常快速回答" : turn.result.metrics.path === "single" ? "单师直接回答" : "协作流程"}
+                        {" · "}总耗时 {(turn.result.metrics.totalMs / 1000).toFixed(1)} 秒
+                        {turn.result.metrics.firstTextMs !== null && <> · 首段正文 {(turn.result.metrics.firstTextMs / 1000).toFixed(1)} 秒</>}
+                        {turn.result.metrics.modelCalls !== null && <> · 模型调用 {turn.result.metrics.modelCalls} 次</>}
+                      </p>
+                    )}
                     {!turn && (
                       <div className="empty-run">
                         <Workflow size={22} strokeWidth={1.4} />

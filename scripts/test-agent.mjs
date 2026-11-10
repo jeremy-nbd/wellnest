@@ -1,5 +1,6 @@
 import { build } from "esbuild";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { mkdir, rm } from "node:fs/promises";
 const directory = new URL("../work/tests/", import.meta.url);
 await mkdir(directory, { recursive: true });
@@ -9,9 +10,9 @@ await build({
   bundle: true,
   platform: "node",
   format: "esm",
-  outfile: output.pathname,
+  outfile: fileURLToPath(output),
 });
-const result = spawnSync(process.execPath, ["--test", output.pathname], {
+const result = spawnSync(process.execPath, ["--test", fileURLToPath(output)], {
   stdio: "inherit",
 });
 await rm(output, { force: true });

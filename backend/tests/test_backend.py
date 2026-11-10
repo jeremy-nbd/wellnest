@@ -83,13 +83,23 @@ class FakeProvider:
     def __init__(self, replies):
         self.replies = iter(replies)
         self.messages = []
+        self.calls = 0
 
     async def complete(self, messages, **options):
+        self.calls += 1
         self.messages.append(json.loads(json.dumps(messages)))
         reply = next(self.replies)
         if isinstance(reply, Exception):
             raise reply
         return reply
+
+    async def stream_text(self, messages, on_delta):
+        reply = await self.complete(messages)
+        text = reply["content"]
+        for part in [text[:len(text)//2], text[len(text)//2:]]:
+            if part:
+                on_delta(part)
+        return text
 
 
 class Contracts(unittest.TestCase):
@@ -174,8 +184,9 @@ class Orchestration(unittest.IsolatedAsyncioTestCase):
         result, events, _ = await self.run_case(
             [
                 response(dict(ROUTE, primary="general")),
-                response(ROUTE),
+                response(dict(ROUTE, tasks=ROUTE["tasks"] + [dict(agent="sports", task="运动", dependsOn=["sleep"])])),
                 response("free text"),
+                response(REPORT),
                 response(REPORT),
                 response("ok"),
             ]
@@ -330,7 +341,7 @@ class Orchestration(unittest.IsolatedAsyncioTestCase):
         successes = [
             e for e in events if e.get("data", {}).get("title") == "读取共享健康档案"
         ]
-        self.assertEqual(len(successes), 8)
+        self.assertEqual(len(successes), 9)  # One automatic local read plus eight requested tools.
 
 
 class ProviderTests(unittest.IsolatedAsyncioTestCase):

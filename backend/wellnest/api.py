@@ -13,7 +13,8 @@ from pydantic import ValidationError
 from .config import Settings
 from .models import ChatInput, Query
 from .orchestrator import run_consultation
-from .provider import ProviderError
+from .provider import Provider, ProviderError
+from .nutrition import AnalyzeInput, ConfirmedMeal, analyze, calculate
 from .rag import KnowledgeBase
 
 
@@ -148,6 +149,22 @@ def create_app(settings=None):
             media_type="application/x-ndjson",
             headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
         )
+
+    @app.post("/meals/{operation}")
+    async def meals(operation: str, request: Request):
+        if operation not in ("analyze", "calculate"):
+            return JSONResponse({"error": "接口不存在。"}, status_code=404)
+        try:
+            body = await read_body(request, 6000000)
+            if operation == "calculate":
+                meal = ConfirmedMeal.model_validate(body)
+                return calculate(meal.items)
+            data = AnalyzeInput.model_validate(body)
+        except OverflowError:
+            return JSONResponse({"error": "图片或消息过大。"}, status_code=413)
+        except (ValueError, ValidationError):
+            return JSONResponse({"error": "请检查图片、食物分量或日期；演示模式只支持示例餐食。"}, status_code=400)
+        return await analyze(data, Provider(settings, app.state.client))
 
     @app.get("/status")
     async def status():

@@ -45,6 +45,11 @@ class MigrationTests(unittest.IsolatedAsyncioTestCase):
                     return response(REPORT)
                 return response("汇总")
 
+            async def stream_text(self, messages, on_delta):
+                reply = await self.complete(messages)
+                on_delta(reply["content"])
+                return reply["content"]
+
         result = await run_consultation(
             INPUT,
             Settings(),

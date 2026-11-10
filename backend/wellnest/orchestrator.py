@@ -4,11 +4,16 @@ import asyncio
 import json
 import re
 from datetime import UTC, datetime
+from contextlib import contextmanager
+from time import perf_counter
 from uuid import uuid4
 
 from pydantic import ValidationError
 
 from .models import ReportBody, Route
+from .fast_route import quick_route
+from .single_expert import answer_single
+from .nutrition import with_meals
 from .provider import Provider, ProviderError, parse_json
 from .tools import EXPERTS, PROMPTS, RESOURCES, execute_tool, unique_sources
 
@@ -72,7 +77,7 @@ def failed_report(agent, message, sources=None):
 
 async def run_consultation(data, settings, emit, client, rag, provider=None):
     provider = provider or Provider(settings, client)
-    profile = data["profile"]
+    profile = with_meals(data["profile"], data.get("meals", []), data["mode"])
 
     def trace(kind, title, detail, agent=None):
         event = dict(
@@ -86,8 +91,38 @@ async def run_consultation(data, settings, emit, client, rag, provider=None):
             event["agent"] = agent
         emit(dict(type="trace", data=event))
 
+    started = perf_counter()
+    timings = []
+    first_text_ms = None
+
+    @contextmanager
+    def measure(stage):
+        began = perf_counter()
+        try:
+            yield
+        finally:
+            duration = round((perf_counter() - began) * 1000)
+            timings.append(dict(stage=stage, durationMs=duration))
+
+    async def stream_answer(messages):
+        def delta(text):
+            nonlocal first_text_ms
+            if first_text_ms is None:
+                first_text_ms = round((perf_counter() - started) * 1000)
+            emit(dict(type="answer_delta", data={"text": text}))
+        return await provider.stream_text(messages, delta)
+
+    def finish(value, path):
+        metrics = dict(path=path, totalMs=round((perf_counter() - started) * 1000),
+                       firstTextMs=first_text_ms, stages=timings,
+                       modelCalls=getattr(provider, "calls", None),
+                       modelTimings=getattr(provider, "timings", []))
+        trace("status", "耗时统计", encode(metrics))
+        return {**value, "metrics": metrics}
+
     image_context = ""
     if data.get("image"):
+        image_started = perf_counter()
         if data["mode"] == "demo":
             raise ProviderError("图片识别需要真实模型模式和服务端 API Key。")
         trace(
@@ -112,16 +147,21 @@ async def run_consultation(data, settings, emit, client, rag, provider=None):
             vision=True,
         )
         image_context = "图片识别结果（待用户核对）：" + str(response["content"])
+        timings.append(dict(stage="image", durationMs=round((perf_counter() - image_started) * 1000)))
+    route_started = perf_counter()
+    fast = quick_route(data, profile) if data["mode"] == "live" else None
     trace(
         "route",
-        "协调 Agent · 识别咨询需求",
-        "演示模式使用确定性规则。"
-        if data["mode"] == "demo"
-        else "结合当前问题、最近对话、已选专家和健康档案摘要分配任务。",
+        "直接分配日常问题" if fast else "协调 Agent · 识别咨询需求",
+        "演示模式使用确定性规则。" if data["mode"] == "demo" else
+        "命中明确日常意图，直接使用对应专家，无需额外模型分配。" if fast else
+        "结合当前问题、最近对话、已选专家和健康档案摘要分配任务。",
     )
     if data["mode"] == "demo":
         await asyncio.sleep(0.45)
         route = simulated_route(data)
+    elif fast:
+        route = fast
     else:
         context = dict(
             messages=data["messages"],
@@ -176,6 +216,7 @@ async def run_consultation(data, settings, emit, client, rag, provider=None):
             route = Route.model_validate(
                 parse_json(corrected.get("content"))
             ).model_dump()
+    timings.append(dict(stage="route", durationMs=round((perf_counter() - route_started) * 1000)))
     emit(dict(type="route", data=route))
     trace("route", "任务分配完成", route["summary"], route["primary"])
     result = dict(
@@ -192,7 +233,16 @@ async def run_consultation(data, settings, emit, client, rag, provider=None):
             if route["urgent"]
             else route["clarification"]
         )
-        return result
+        return finish(result, "clarification")
+    if data["mode"] == "live" and len(route["tasks"]) == 1:
+        answer, report = await answer_single(
+            data, profile, route["tasks"][0], image_context, provider, rag,
+            bool(fast), trace, measure, stream_answer,
+        )
+        answer = normalize_citations(answer, report["sources"])
+        trace("status", "本次咨询完成", "单专家直接回答，无二次汇总。")
+        return finish(dict(result, answer=answer, reports=[report], sources=report["sources"]),
+                      "fast" if fast else "single")
     reports = []
 
     async def run_expert(task):
@@ -201,9 +251,10 @@ async def run_consultation(data, settings, emit, client, rag, provider=None):
         trace("agent", EXPERTS[agent]["name"] + "开始处理", task["task"], agent)
 
         async def tool(name, args):
-            response = await execute_tool(
-                agent, name, args, profile, rag, provider, sources
-            )
+            with measure("tool:" + agent + ":" + name):
+                response = await execute_tool(
+                    agent, name, args, profile, rag, provider, sources
+                )
             sources.extend(response["sources"])
             trace("tool", response["label"], encode(response["data"]), agent)
             return response["data"]
@@ -397,7 +448,8 @@ async def run_consultation(data, settings, emit, client, rag, provider=None):
                     task["agent"],
                 )
                 return failed_report(task["agent"], "上游任务失败")
-            return await run_expert(task)
+            with measure("expert:" + task["agent"]):
+                return await run_expert(task)
 
         batch = await asyncio.gather(*(scheduled(task) for task in ready))
         reports.extend(batch)
@@ -427,49 +479,31 @@ async def run_consultation(data, settings, emit, client, rag, provider=None):
         )
         answer += "\n\n### 下一步\n切换到真实模型模式后，专家会围绕你的具体问题选择工具、分析记录，并整合建议。\n\n本次为预设流程演示，以上记录的来源已在右侧标注。"
     else:
-        response = await provider.complete(
-            [
-                dict(
-                    role="system",
-                    content=prompt("synthesis", name=EXPERTS[route["primary"]]["name"]),
-                ),
-                dict(
-                    role="user",
-                    content=encode(
-                        dict(
-                            messages=data["messages"],
-                            reports=reports,
-                            sources=sources,
-                            imageContext=image_context,
-                            dataSource=profile["source"],
-                        )
-                    ),
-                ),
-            ]
-        )
-        answer = str(response.get("content", ""))
-
-        def citation(match):
-            source = next(
-                (s for s in sources if s.get("url") == match[2].replace("&amp;", "&")),
-                None,
-            )
-            return (
-                f"[{source['title']}]({source['url']})"
-                if source
-                else match[1] + "（引用待核对）"
-            )
-
-        answer = re.sub(r"\[([^\]]+)\]\((/api/rag/page\?[^\s)]+)\)", citation, answer)
+        with measure("synthesis"):
+            answer = await stream_answer([
+                dict(role="system", content=prompt("synthesis", name=EXPERTS[route["primary"]]["name"])),
+                dict(role="user", content=encode(dict(
+                    messages=data["messages"], reports=reports, sources=sources,
+                    imageContext=image_context, dataSource=profile["source"],
+                ))),
+            ])
+        answer = normalize_citations(answer, sources)
     trace(
         "status",
         "本次咨询完成",
         f"共 {len(reports)} 位专家参与，{len(sources)} 项数据与知识来源。",
     )
-    return dict(
+    return finish(dict(
         result,
         answer=answer,
         reports=reports,
         sources=sources,
         partial=any(r["status"] == "failed" for r in reports),
-    )
+    ), "demo" if data["mode"] == "demo" else "multi")
+
+
+def normalize_citations(answer, sources):
+    def citation(match):
+        source = next((s for s in sources if s.get("url") == match[2].replace("&amp;", "&")), None)
+        return f"[{source['title']}]({source['url']})" if source else match[1] + "（引用待核对）"
+    return re.sub(r"\[([^\]]+)\]\((/api/rag/page\?[^\s)]+)\)", citation, answer)

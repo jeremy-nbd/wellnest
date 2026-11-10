@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .nutrition import ConfirmedMeal
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(strict=True)
@@ -32,6 +34,7 @@ class Message(StrictModel):
 
 
 class ChatInput(StrictModel):
+    meals: list[ConfirmedMeal] = Field(default_factory=list, max_length=30)
     messages: list[Message] = Field(min_length=1, max_length=30)
     profile: Profile
     preferred: Literal["auto", "nutrition", "sports", "general", "sleep", "tcm"] = (

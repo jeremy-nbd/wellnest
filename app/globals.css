@@ -2414,3 +2414,48 @@ code {
   overflow-y: auto;
   color: #6e776a;
 }
+
+/* Meal recognition lives in the existing consultation, with explicit confirmation. */
+.meal-card { margin: 14px 0; border: 1px solid #dedbcf; border-radius: 16px; background: #fdfcf8; overflow: hidden; padding: 18px; }
+.meal-card header, .meal-card header span, .meal-card footer, .meal-card footer span { display: flex; align-items: center; gap: 8px; }
+.meal-card header { justify-content: space-between; gap: 12px; font-weight: 600; color: #715633; }
+.meal-card header small { font-size: 11px; white-space: nowrap; color: #7c816e; }
+.meal-hint, .meal-source { font-size: 12px; line-height: 1.7; color: #777c70; margin: 10px 0; }
+.meal-source { font-size: 11px; }
+.meal-card fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.meal-meta { display: flex; gap: 16px; margin: 12px 0; }
+.meal-meta label, .meal-amount label { font-size: 11px; color: #797e72; }
+.meal-card input, .meal-card select { border: 1px solid #dedfd5; border-radius: 7px; padding: 6px; background: white; color: #3e493b; font: inherit; }
+.meal-meta input, .meal-meta select { display: block; margin-top: 5px; max-width: 100%; }
+.meal-food { display: flex; justify-content: space-between; gap: 14px; border-top: 1px solid #e9e7de; padding: 12px 0; }
+.meal-food strong { font-size: 13px; }
+.meal-food small { display: block; font-size: 11px; color: #7e8278; line-height: 1.7; }
+.meal-amount { flex-shrink: 0; text-align: right; }
+.meal-amount input { width: 72px; margin: 0 5px; }
+.meal-portion-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 7px; }
+.meal-card button, .meal-demo, .meal-composer-label button, .meal-image-switch { cursor: pointer; border: 0; background: transparent; color: #687c53; font: inherit; font-size: 11px; }
+.meal-card button:disabled { opacity: .4; cursor: default; }
+.meal-portion-actions button { display: flex; align-items: center; gap: 3px; }
+.meal-nutrients { display: grid; grid-template-columns: repeat(4, 1fr); border-radius: 10px; background: #f1efe5; padding: 13px 5px; text-align: center; }
+.meal-nutrients small { display: block; font-size: 10px; color: #828274; margin-bottom: 5px; }
+.meal-nutrients strong { font-size: 21px; font-weight: 500; color: #655b43; }
+.meal-nutrients strong span { margin-left: 3px; font-size: 10px; }
+.meal-card footer { flex-wrap: wrap; border-top: 1px solid #e9e7de; padding-top: 13px; font-size: 11px; color: #687c53; }
+.meal-card footer button { padding: 8px 10px; }
+.meal-card .meal-primary { background: #667c57; color: white; border-radius: 8px; }
+.meal-error { color: #a44832; font-size: 12px; }
+.meal-discarded { font-size: 12px; color: #92958b; margin: 14px 0; }
+.meal-composer-label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #927047; padding: 8px 12px; }
+.meal-image-switch { padding: 6px 12px; }
+.meal-demo { margin: 0 0 8px; padding: 0; }
+.meal-daily { padding: 8px 12px; background: #f0f3eb; border-radius: 8px; color: #687b58; font-size: 11px; margin-bottom: 8px; }
+.meal-daily span { display: block; font-size: 10px; color: #8c9284; margin-top: 4px; }
+.composer-tools .food-entry { width: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 5px 7px; }
+@media (max-width: 600px) {
+  .meal-card { padding: 12px; }
+  .meal-card header { align-items: flex-start; flex-direction: column; gap: 5px; }
+  .meal-food { gap: 8px; }
+  .meal-amount label { font-size: 10px; }
+  .meal-amount input { width: 58px; }
+  .meal-nutrients strong { font-size: 18px; }
+}
